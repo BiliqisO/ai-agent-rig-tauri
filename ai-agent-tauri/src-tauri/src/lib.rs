@@ -5,9 +5,12 @@ use rig::{
     providers::{self, openai},
     streaming::{StreamingPrompt, StreamedAssistantContent},
 };
+
+use std::{sync::Arc, time::Duration};
 use tauri::Emitter;
+use tokio::sync::Mutex;
 use serde::Serialize;
-use log::error;
+use log::{error, info};
 use futures_util::StreamExt;
 
 mod tool;
@@ -44,16 +47,28 @@ async fn chat_with_agent(message: String, app_handle: tauri::AppHandle) -> Resul
     }
     let openai_client = openai::Client::from_env();
 
-    let agent = openai_client
+    let mut agent = openai_client
             .agent(providers::openai::GPT_4O)
             .preamble("You are a helpful assistant. Use your tools when necessary.")
-            .tool(tool::GetCurrentTime)
-    if let Ok((tools, client)) = get_connection().await{
-        info!("Using connection with {} tools", tools.len());
-        for tool in tools{
-            agent = agent.rmcp_tool(tool, client.clone());
+            .max_tokens(1024)
+            .tool(tool::GetCurrentTime);
+
+    match get_connection().await {
+        Ok((tools, client)) => {
+            info!("✓ Connected to MCP server with {} tools", tools.len());
+            for tool in &tools {
+                info!("  - Tool: {}", tool.name);
+            }
+            for tool in tools {
+                agent = agent.rmcp_tool(tool, client.clone());
+            }
         }
-    };
+        Err(e) => {
+            error!("Failed to connect to MCP server: {}", e);
+            error!("Agent will run without web search capability");
+        }
+    }
+
     let agent = agent.build();
 
   
@@ -123,10 +138,21 @@ async fn get_connection() -> Result<(Vec<rmcp::model::Tool>, rmcp::Peer<rmcp::Ro
 }
 async fn create_connection() -> Result<ConnectionHolder, Box<dyn std::error::Error + Send + Sync>> {
     use rmcp::{model::{ClientCapabilities, ClientInfo, Implementation}, ServiceExt};
+    use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 
-    let server_url = std::env::var("MCP_SERVER_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-    let endpoint = format!("{}/mcp", server_url.replace("localhost", "192.168.1.4"));
-    let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(endpoint.as_str());
+    let server_url = std::env::var("MCP_SERVER_URL").unwrap_or_else(|_| "http://localhost:8081".to_string());
+    let endpoint = format!("{}/mcp", server_url);
+
+    let uri: std::sync::Arc<str> = endpoint.into();
+    let config = StreamableHttpClientTransportConfig {
+        uri,
+        ..Default::default()
+    };
+
+    let transport = rmcp::transport::StreamableHttpClientTransport::with_client(
+        reqwest::Client::new(),
+        config
+    );
 
     let client_info = ClientInfo {
         protocol_version: Default::default(),
@@ -134,6 +160,9 @@ async fn create_connection() -> Result<ConnectionHolder, Box<dyn std::error::Err
         client_info: Implementation {
             name: "agent-conversation".to_string(),
             version: "0.1.0".to_string(),
+            title: None,
+            website_url: None,
+            icons: None,
         },
     };
 
@@ -161,83 +190,10 @@ async fn create_connection() -> Result<ConnectionHolder, Box<dyn std::error::Err
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    eprintln!("=== APP STARTING ===");
-    eprintln!("Current directory: {:?}", std::env::current_dir());
+    dotenv::dotenv().ok();
 
-    // Try to load .env - dotenv should work from src-tauri directory
-    match dotenv::dotenv() {
-        Ok(path) => eprintln!("✓ Loaded .env from: {:?}", path),
-        Err(e) => {
-            eprintln!("dotenv::dotenv() failed: {:?}", e);
-            eprintln!("Attempting manual .env load...");
-
-            // Manual fallback - try to read and parse .env file
-            let paths = [
-                ".env",
-                "src-tauri/.env",
-                "../.env",
-                "../../.env",
-            ];
-
-            let mut loaded = false;
-            for path in &paths {
-                eprintln!("  Checking: {}", path);
-                if let Ok(contents) = std::fs::read_to_string(path) {
-                    eprintln!("  ✓ Found .env at: {}", path);
-                    for line in contents.lines() {
-                        let line = line.trim();
-                        // Skip empty lines and comments
-                        if line.is_empty() || line.starts_with('#') {
-                            continue;
-                        }
-                        if line.starts_with("OPENAI_API_KEY") {
-                            if let Some((_, value)) = line.split_once('=') {
-                                // Remove quotes and trim whitespace
-                                let key = value.trim().trim_matches('"').trim_matches('\'');
-                                if !key.is_empty() {
-                                    std::env::set_var("OPENAI_API_KEY", key);
-                                    eprintln!("  ✓ Set OPENAI_API_KEY from {} (length: {})", path, key.len());
-                                    loaded = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if loaded {
-                        break;
-                    }
-                }
-            }
-
-            if !loaded {
-                eprintln!("  ✗ Could not find .env file in any expected location");
-            }
-        }
-    }
-
-    // Verify API key is loaded and trim any quotes if dotenv loaded them
-    match std::env::var("OPENAI_API_KEY") {
-        Ok(key) => {
-            // If the key has quotes, remove them
-            let cleaned_key = key.trim_matches('"').trim_matches('\'');
-            if cleaned_key != key {
-                eprintln!("  Cleaning quotes from OPENAI_API_KEY...");
-                std::env::set_var("OPENAI_API_KEY", cleaned_key);
-            }
-
-            let final_key = std::env::var("OPENAI_API_KEY").unwrap();
-            let len = final_key.len();
-            if len > 11 {
-                eprintln!("✓✓✓ OPENAI_API_KEY READY: {}...{} (length: {})", &final_key[..7], &final_key[len-4..], len);
-            } else {
-                eprintln!("✓ OPENAI_API_KEY set (length: {})", len);
-            }
-        }
-        Err(_) => {
-
-            eprintln!("Please set OPENAI_API_KEY in your .env file or environment variables.");
-    
-        }
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        eprintln!("OPENAI_API_KEY environment variable not set");
     }
 
     tauri::Builder::default()

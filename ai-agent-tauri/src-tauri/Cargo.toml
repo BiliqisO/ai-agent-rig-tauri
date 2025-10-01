@@ -24,7 +24,7 @@ tauri-plugin-opener = "2"
 rig-core = { version = "0.21.0", features = ["rmcp"] }
 
 futures-util = "0.3"
-rmcp = { version = "0.5", features = ["client", "transport-streamable-http-client", "transport-sse-client", "reqwest"] }
+rmcp = { version = "0.6.4", features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest = { version = "0.12", features = ["json"] }
 dotenv = "0.15"
 tokio = {version = "1.47.1", features= ["full"] }

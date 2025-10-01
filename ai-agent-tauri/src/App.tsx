@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 import { listen } from "@tauri-apps/api/event";
+import Markdown from "markdown-to-jsx";
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -139,7 +140,7 @@ function App() {
   return (
     <div class="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Header */}
-      <header class="bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4 flex items-center justify-between shadow-sm">
+      <header class="fixed top-0 left-0 right-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4 flex items-center justify-between shadow-sm">
         <div class="flex items-center space-x-4">
           <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg">
             <span class="text-white text-sm font-bold">AI</span>
@@ -160,7 +161,7 @@ function App() {
       </header>
 
       {/* Conversation Area */}
-      <main class="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-5">
+      <main class="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-5 mt-[76px] mb-[160px]">
         {messages.length === 0 && (
           <div class="flex flex-col items-center justify-center h-full space-y-4 opacity-60">
             <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-xl">
@@ -196,7 +197,9 @@ function App() {
                 {message.role === "system" && (
                   <div class="text-xs font-semibold mb-2 opacity-75">System Message</div>
                 )}
-                <p class="text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                <div class="text-[15px] leading-relaxed markdown-content">
+                  <Markdown>{message.content}</Markdown>
+                </div>
               </div>
               <span class={`text-xs text-slate-400 px-2 ${message.role === "user" ? "text-right" : "text-left"}`}>
                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -213,7 +216,9 @@ function App() {
             </div>
             <div class="flex flex-col max-w-[70%] space-y-1">
               <div class="bg-white text-slate-800 rounded-2xl px-4 py-3 shadow-md border border-slate-200">
-                <p class="text-[15px] leading-relaxed whitespace-pre-wrap">{currentAssistantMessage}</p>
+                <div class="text-[15px] leading-relaxed markdown-content">
+                  <Markdown>{currentAssistantMessage}</Markdown>
+                </div>
                 <span class="inline-block w-2 h-4 bg-violet-500 ml-1 animate-pulse"></span>
               </div>
               <span class="text-xs text-slate-400 px-2">streaming...</span>
@@ -243,7 +248,7 @@ function App() {
       </main>
 
       {/* Input Area */}
-      <div class="bg-white/80 backdrop-blur-md border-t border-slate-200/60 px-6 py-4 shadow-lg">
+      <div class="fixed bottom-0 left-0 right-0 z-10 bg-white/80 backdrop-blur-md border-t border-slate-200/60 px-6 py-4 shadow-lg">
         {/* Quick Actions */}
         <div class="flex gap-2 mb-3 overflow-x-auto pb-1">
           <button
